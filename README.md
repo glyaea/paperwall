@@ -14,6 +14,6 @@ Shun battery drain, disk bloat, and menu flooding!
 | ---------------- | ------------------------------------------------------- |
 | Linux            | `~/.config/paperwall/settings.json`                     |
 | MacOS            | `~/Library/Application Support/paperwall/settings.json` |
-| Windows          | `%LOCALAPPDATA%\paperwall\config.json`                  |
+| Windows          | `%LOCALAPPDATA%\paperwall\settings.json`                |
 
 <!-- Lowercase app spelling for paths: you are welcome, devs. -->
