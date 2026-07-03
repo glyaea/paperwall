@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="stylesheet" href="main.css">
+</head>
+<body>
+	<main>
+		<section class="controls">
+			<label>Directory</label>
+			<select name="directory">
+				<option>{{directory}}</option>
+			</select>
+			<label>Scaling</label>
+			<select name="scaling">
+				{{scaling_options}}
+			</select>
+		</section>
+		<section class="grid">
+			{{tiles}}
+		</section>
+	</main>
+	<script src="main.js"></script>
+</body>
+</html>
