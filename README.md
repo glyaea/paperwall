@@ -1,14 +1,16 @@
 # PaperWall
 
-A cross-platform live wallpaper app in beta.
+An efficient cross-platform live wallpaper app in beta.
 
-Shun battery drain, disk bloat, and menu flooding!
+Shun high utilisation and permanent bloat.
 
-<!-- - Hidamari is Linux-only. -->
-<!-- - Wallspace is MacOS-only. -->
-<!-- - Wallpaper Engine is Windows-only. -->
-<!-- - ScreenPlay mainly installs through Steam, bloating disk. -->
-<!-- - Iris constantly loops through frames, flooding menus. -->
+| Alternative      | Operating System Support | Official Installation Path(s) | Pricing Model |
+| ---------------- | ------------------------ | ----------------------------- | ------------- |
+| Hidamari         | Linux                    | Flathub                       | Free          |
+| Wallspace        | MacOS                    | Direct or Homebrew            | Freemium      |
+| Wallpaper Engine | Windows                  | Humble Store, Steam           | Paid          |
+| ScreenPlay       | Linux, MacOS, Windows    | Steam                         | Free          |
+| PaperWall        | Linux, MacOS, Windows    | Direct (planned)              | Free          |
 
 | Operating System | Path                                                    |
 | ---------------- | ------------------------------------------------------- |

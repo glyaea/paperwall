@@ -25,6 +25,8 @@ const MAIN_JS: &str = include_str!("main.js");
 const PICKER_MIN_HEIGHT: f64 = 600.0;
 const PICKER_MIN_WIDTH: f64 = 800.0;
 const WALLPAPER_EVENT_INTERVAL: Duration = Duration::from_secs(1);
+#[cfg(target_os = "windows")]
+const WALLPAPER_HTML: &str = include_str!("windows/wallpaper.html");
 
 struct Video {
 	name: String,
@@ -76,7 +78,6 @@ fn run() -> Result<(), Box<dyn Error>> {
 	let proxy = event_loop.create_proxy();
 	let picker_window = create_picker_window(&event_loop)?;
 	let wallpaper_window = platform::create_wallpaper_window(&event_loop)?;
-	platform::configure_wallpaper_window(&wallpaper_window)?;
 	let picker_webview = create_picker_webview(
 		&picker_window,
 		proxy,
@@ -88,6 +89,7 @@ fn run() -> Result<(), Box<dyn Error>> {
 	let mut selected_video = None;
 	let mut scaling_mode = settings.scaling_mode;
 	let mut wallpaper_player = platform::create_wallpaper_player(&wallpaper_window)?;
+	platform::configure_wallpaper_window(&wallpaper_window)?;
 	wallpaper_player.set_scaling_mode(scaling_mode);
 	if should_write_settings && let Err(error) = write_settings(&settings_path, &settings) {
 		eprintln!("Reporting settings error | {error}");
@@ -399,6 +401,14 @@ impl ScalingMode {
 			Self::FitToScreen => "Fit to Screen"
 		}
 	}
+
+	#[cfg(target_os = "windows")]
+	fn object_fit(self) -> &'static str {
+		match self {
+			Self::FillScreen => "cover",
+			Self::FitToScreen => "contain"
+		}
+	}
 }
 
 #[cfg(target_os = "macos")]
@@ -707,14 +717,15 @@ mod platform {
 	use super::*;
 	use std::collections::HashSet;
 	use std::env;
+	use std::io::{Read, Seek, SeekFrom};
 	use std::mem::ManuallyDrop;
 	use std::os::windows::ffi::OsStrExt;
 	use std::time::UNIX_EPOCH;
 	use tao::dpi::PhysicalSize;
 	use tao::platform::windows::{WindowBuilderExtWindows, WindowExtWindows};
-	use windows::core::{BOOL, GUID, IUnknown, Interface, PCWSTR};
+	use windows::core::{BOOL, GUID, IUnknown, PCWSTR};
 	use windows::Win32::Foundation::{
-		COLORREF, HWND, LPARAM, RECT, RPC_E_CHANGED_MODE, S_FALSE, S_OK, SIZE, WPARAM
+		GENERIC_WRITE, HWND, LPARAM, RECT, RPC_E_CHANGED_MODE, S_FALSE, S_OK, WPARAM
 	};
 	use windows::Win32::Graphics::Imaging::{
 		CLSID_WICImagingFactory, GUID_ContainerFormatJpeg, GUID_WICPixelFormat24bppBGR,
@@ -722,40 +733,30 @@ mod platform {
 		WICBitmapEncoderNoCache, WICBitmapPaletteTypeCustom
 	};
 	use windows::Win32::Media::MediaFoundation::{
-		IMFAttributes, IMFMediaEvent, IMFMediaSession, IMFMediaSource, IMFSample,
-		IMFStreamDescriptor, IMFTopology, IMFTopologyNode, IMFVideoDisplayControl, MEError,
-		MEEndOfPresentation, MESessionEnded, MESessionTopologyStatus, MFCreateAttributes,
-		MFCreateMediaSession, MFCreateMediaType, MFCreateSourceReaderFromURL,
-		MFCreateSourceResolver, MFCreateTopology, MFCreateTopologyNode,
-		MFCreateVideoRendererActivate, MFMediaType_Video, MFShutdown, MFStartup,
-		MFSTARTUP_LITE, MFVideoARMode_None, MFVideoFormat_RGB32, MFVideoNormalizedRect,
-		MF_E_NO_EVENTS_AVAILABLE, MF_EVENT_FLAG_NO_WAIT, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE,
-		MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_OBJECT_MEDIASOURCE, MF_OBJECT_TYPE,
-		MF_PD_DURATION, MF_RESOLUTION_MEDIASOURCE,
+		IMFAttributes, IMFSample, MFCreateAttributes, MFCreateMediaType,
+		MFCreateSourceReaderFromURL, MFMediaType_Video, MFShutdown, MFStartup, MFSTARTUP_LITE,
+		MFVideoFormat_RGB32, MF_MT_FRAME_RATE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE,
+		MF_PD_DURATION,
 		MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED, MF_SOURCE_READERF_ENDOFSTREAM,
 		MF_SOURCE_READERF_NATIVEMEDIATYPECHANGED, MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING,
-		MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READER_MEDIASOURCE,
-		MF_TOPOLOGY_OUTPUT_NODE, MF_TOPOLOGY_SOURCESTREAM_NODE,
-		MF_TOPONODE_PRESENTATION_DESCRIPTOR, MF_TOPONODE_SOURCE,
-		MF_TOPONODE_STREAM_DESCRIPTOR, MF_TOPOSTATUS_READY, MF_VERSION, MFGetService,
-		MR_VIDEO_RENDER_SERVICE
+		MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READER_MEDIASOURCE, MF_VERSION
 	};
 	use windows::Win32::System::Com::StructuredStorage::{
 		PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0, PropVariantClear,
-		PropVariantToInt32, PropVariantToInt64
+		PropVariantToInt64
 	};
 	use windows::Win32::System::Com::{
 		CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
-		CoTaskMemFree, CoUninitialize, STGM_CREATE, STGM_WRITE
+		CoTaskMemFree, CoUninitialize
 	};
 	use windows::Win32::System::Variant::VT_I8;
 	use windows::Win32::UI::Shell::{FOLDERID_Videos, KF_FLAG_DEFAULT, SHGetKnownFolderPath};
-	use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
 	use windows::Win32::UI::WindowsAndMessaging::{
-		EnumWindows, FindWindowExW, FindWindowW, GetClientRect, GetWindowLongPtrW, SendMessageTimeoutW,
-		SetParent, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_BOTTOM, SMTO_NORMAL,
-		SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, WS_EX_NOACTIVATE,
-		WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT
+		EnumChildWindows, EnumWindows, FindWindowExW, FindWindowW, GetClassNameW, GetClientRect,
+		GetWindowLongPtrW, IsWindowVisible, SendMessageTimeoutW,
+		SetParent, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE, HWND_TOP,
+		SMTO_NORMAL, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
+		SWP_SHOWWINDOW, WS_CHILD, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP
 	};
 
 	const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
@@ -770,13 +771,17 @@ mod platform {
 
 	struct MediaFoundation;
 
+	struct DesktopWindow {
+		hwnd: HWND,
+		label: &'static str
+	}
+
 	pub struct WallpaperPlayer {
-		_com: ComApartment,
-		_mf: MediaFoundation,
 		hwnd: HWND,
 		scaling_mode: ScalingMode,
-		session: Option<IMFMediaSession>,
-		source: Option<IMFMediaSource>
+		serial: u64,
+		video_path: Arc<Mutex<Option<PathBuf>>>,
+		webview: WebView
 	}
 
 	pub fn configure_wallpaper_window(window: &Window) -> Result<(), Box<dyn Error>> {
@@ -786,12 +791,9 @@ mod platform {
 			let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
 			let style = style
 				| WS_EX_NOACTIVATE.0 as isize
-				| WS_EX_TOOLWINDOW.0 as isize
-				| WS_EX_TRANSPARENT.0 as isize;
+				| WS_EX_TOOLWINDOW.0 as isize;
 			let _ = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style);
-			if let Some(desktop_window) = find_desktop_window() {
-				let _ = SetParent(hwnd, Some(desktop_window));
-			}
+			attach_desktop_window(hwnd);
 		}
 		Ok(())
 	}
@@ -816,18 +818,28 @@ mod platform {
 				preview_cache.lock().unwrap().insert(index, preview.clone());
 				create_response("image/jpeg", Cow::Owned(preview))
 			}
-			Err(error) => create_error_response(error)
+			Err(error) => {
+				eprintln!("Reporting preview error | {} | {error}", video.path.display());
+				create_error_response(error)
+			}
 		})
 	}
 
 	pub fn create_wallpaper_player(window: &Window) -> Result<WallpaperPlayer, Box<dyn Error>> {
+		let video_path = Arc::new(Mutex::new(None));
+		let protocol_video_path = Arc::clone(&video_path);
+		let webview = WebViewBuilder::new()
+			.with_custom_protocol("paperwall-wallpaper".into(), move |_, request| {
+				create_wallpaper_response(request, &protocol_video_path)
+			})
+			.with_url("paperwall-wallpaper://localhost/main.html")
+			.build(window)?;
 		Ok(WallpaperPlayer {
-			_com: ComApartment::new()?,
-			_mf: MediaFoundation::new()?,
 			hwnd: HWND(window.hwnd() as *mut _),
 			scaling_mode: ScalingMode::FillScreen,
-			session: None,
-			source: None
+			serial: 0,
+			video_path,
+			webview
 		})
 	}
 
@@ -890,11 +902,15 @@ mod platform {
 	}
 
 	pub fn show_wallpaper_window(window: &Window) {
-		let hwnd = HWND(window.hwnd() as *mut _);
+		show_hwnd(HWND(window.hwnd() as *mut _));
+	}
+
+	fn show_hwnd(hwnd: HWND) {
 		unsafe {
+			attach_desktop_window(hwnd);
 			let _ = SetWindowPos(
 				hwnd,
-				Some(HWND_BOTTOM),
+				Some(HWND_TOP),
 				0,
 				0,
 				0,
@@ -910,6 +926,71 @@ mod platform {
 			.status(500)
 			.body(Cow::Owned(error.to_string().into_bytes()))
 			.unwrap()
+	}
+
+	fn create_status_response(status: u16, text: &'static [u8]) -> Response<Cow<'static, [u8]>> {
+		Response::builder()
+			.header(CONTENT_TYPE, "text/plain")
+			.status(status)
+			.body(Cow::Borrowed(text))
+			.unwrap()
+	}
+
+	fn create_video_response(
+		request: &Request<Vec<u8>>,
+		path: &Path
+	) -> Result<Response<Cow<'static, [u8]>>, Box<dyn Error>> {
+		let metadata = fs::metadata(path)?;
+		let total_len = metadata.len();
+		let content_type = read_video_content_type(path);
+		let mut file = fs::File::open(path)?;
+		if let Some(range) = read_video_range(request, total_len) {
+			let Some((start, end)) = range else {
+				return Ok(Response::builder()
+					.header("Accept-Ranges", "bytes")
+					.header("Content-Range", format!("bytes */{total_len}"))
+					.header(CONTENT_TYPE, content_type)
+					.status(416)
+					.body(Cow::Borrowed(&b""[..]))?);
+			};
+			let content_len = end - start + 1;
+			let mut body = vec![0; usize::try_from(content_len)?];
+			file.seek(SeekFrom::Start(start))?;
+			file.read_exact(&mut body)?;
+			return Ok(Response::builder()
+				.header("Accept-Ranges", "bytes")
+				.header("Content-Length", content_len.to_string())
+				.header("Content-Range", format!("bytes {start}-{end}/{total_len}"))
+				.header(CONTENT_TYPE, content_type)
+				.status(206)
+				.body(Cow::Owned(body))?);
+		}
+		let mut body = Vec::new();
+		file.read_to_end(&mut body)?;
+		Ok(Response::builder()
+			.header("Accept-Ranges", "bytes")
+			.header("Content-Length", total_len.to_string())
+			.header(CONTENT_TYPE, content_type)
+			.body(Cow::Owned(body))?)
+	}
+
+	fn create_wallpaper_response(
+		request: Request<Vec<u8>>,
+		video_path: &Arc<Mutex<Option<PathBuf>>>
+	) -> Response<Cow<'static, [u8]>> {
+		match request.uri().path() {
+			"/" | "/main.html" => create_response(
+				"text/html",
+				Cow::Borrowed(WALLPAPER_HTML.as_bytes())
+			),
+			"/video" => {
+				let Some(path) = video_path.lock().unwrap().clone() else {
+					return create_status_response(404, b"No wallpaper video");
+				};
+				create_video_response(&request, &path).unwrap_or_else(create_error_response)
+			}
+			_ => create_status_response(404, b"Not found")
+		}
 	}
 
 	fn create_cache_file_name(video: &Video) -> Result<String, Box<dyn Error>> {
@@ -957,63 +1038,6 @@ mod platform {
 			attributes.SetUINT32(&MF_SOURCE_READER_ENABLE_VIDEO_PROCESSING, 1)?;
 		}
 		Ok(attributes)
-	}
-
-	fn create_media_source(path: &Path) -> Result<IMFMediaSource, Box<dyn Error>> {
-		let resolver = unsafe { MFCreateSourceResolver()? };
-		let path = wide_path(path);
-		let mut object = None;
-		let mut object_type = MF_OBJECT_TYPE::default();
-		unsafe {
-			resolver.CreateObjectFromURL(
-				PCWSTR::from_raw(path.as_ptr()),
-				MF_RESOLUTION_MEDIASOURCE.0 as u32,
-				None::<&IPropertyStore>,
-				&mut object_type,
-				&mut object
-			)?;
-		}
-		if object_type != MF_OBJECT_MEDIASOURCE {
-			return Err("Media Foundation did not create a media source".into());
-		}
-		Ok(object.ok_or("Could not create media source")?.cast()?)
-	}
-
-	fn create_output_node(hwnd: HWND) -> Result<IMFTopologyNode, Box<dyn Error>> {
-		let activate = unsafe { MFCreateVideoRendererActivate(hwnd)? };
-		let output_node = unsafe { MFCreateTopologyNode(MF_TOPOLOGY_OUTPUT_NODE)? };
-		unsafe {
-			output_node.SetObject(&activate)?;
-		}
-		Ok(output_node)
-	}
-
-	fn create_source_node(
-		source: &IMFMediaSource,
-		presentation: &windows::Win32::Media::MediaFoundation::IMFPresentationDescriptor,
-		stream: &IMFStreamDescriptor
-	) -> Result<IMFTopologyNode, Box<dyn Error>> {
-		let source_node = unsafe { MFCreateTopologyNode(MF_TOPOLOGY_SOURCESTREAM_NODE)? };
-		unsafe {
-			source_node.SetUnknown(&MF_TOPONODE_SOURCE, source)?;
-			source_node.SetUnknown(&MF_TOPONODE_PRESENTATION_DESCRIPTOR, presentation)?;
-			source_node.SetUnknown(&MF_TOPONODE_STREAM_DESCRIPTOR, stream)?;
-		}
-		Ok(source_node)
-	}
-
-	fn create_topology(source: &IMFMediaSource, hwnd: HWND) -> Result<IMFTopology, Box<dyn Error>> {
-		let presentation = unsafe { source.CreatePresentationDescriptor()? };
-		let stream = read_video_stream(&presentation)?;
-		let topology = unsafe { MFCreateTopology()? };
-		let source_node = create_source_node(source, &presentation, &stream)?;
-		let output_node = create_output_node(hwnd)?;
-		unsafe {
-			topology.AddNode(&source_node)?;
-			topology.AddNode(&output_node)?;
-			source_node.ConnectOutput(0, &output_node, 0)?;
-		}
-		Ok(topology)
 	}
 
 	fn decode_preview(path: &Path) -> Result<(u32, u32, Vec<u8>), Box<dyn Error>> {
@@ -1089,30 +1113,6 @@ mod platform {
 		Ok(((frame_size >> 32) as u32, frame_size as u32))
 	}
 
-	fn read_display_control(
-		session: &IMFMediaSession
-	) -> Result<IMFVideoDisplayControl, Box<dyn Error>> {
-		let mut pointer = std::ptr::null_mut();
-		unsafe {
-			MFGetService(
-				session,
-				&MR_VIDEO_RENDER_SERVICE,
-				&IMFVideoDisplayControl::IID,
-				&mut pointer
-			)?;
-			Ok(IMFVideoDisplayControl::from_raw(pointer))
-		}
-	}
-
-	fn read_event_value(event: &IMFMediaEvent) -> Option<i32> {
-		let mut value = unsafe { event.GetValue().ok()? };
-		let result = unsafe { PropVariantToInt32(&value).ok() };
-		unsafe {
-			PropVariantClear(&mut value).ok()?;
-		}
-		result
-	}
-
 	fn read_next_frame(
 		reader: &windows::Win32::Media::MediaFoundation::IMFSourceReader,
 		stream: u32,
@@ -1145,31 +1145,6 @@ mod platform {
 				return Ok((width, height, read_sample_pixels(&sample, width, height)?));
 			}
 		}
-	}
-
-	fn read_video_stream(
-		presentation: &windows::Win32::Media::MediaFoundation::IMFPresentationDescriptor
-	) -> Result<IMFStreamDescriptor, Box<dyn Error>> {
-		let stream_count = unsafe { presentation.GetStreamDescriptorCount()? };
-		for index in 0..stream_count {
-			let mut selected = BOOL(0);
-			let mut stream = None;
-			unsafe {
-				presentation.GetStreamDescriptorByIndex(index, &mut selected, &mut stream)?;
-			}
-			let stream = stream.ok_or("Could not read stream descriptor")?;
-			let media_type_handler = unsafe { stream.GetMediaTypeHandler()? };
-			if unsafe { media_type_handler.GetMajorType()? } == MFMediaType_Video {
-				unsafe {
-					presentation.SelectStream(index)?;
-				}
-				return Ok(stream);
-			}
-			unsafe {
-				presentation.DeselectStream(index)?;
-			}
-		}
-		Err("Could not find a video stream".into())
 	}
 
 	fn read_preview(video: &Video) -> Result<Vec<u8>, Box<dyn Error>> {
@@ -1212,6 +1187,62 @@ mod platform {
 		duration / 2
 	}
 
+	fn read_video_content_type(path: &Path) -> &'static str {
+		let extension = path
+			.extension()
+			.and_then(|extension| extension.to_str())
+			.unwrap_or_default();
+		if extension.eq_ignore_ascii_case("mp4") || extension.eq_ignore_ascii_case("m4v") {
+			return "video/mp4";
+		}
+		if extension.eq_ignore_ascii_case("webm") {
+			return "video/webm";
+		}
+		if extension.eq_ignore_ascii_case("mov") {
+			return "video/quicktime";
+		}
+		if extension.eq_ignore_ascii_case("avi") {
+			return "video/x-msvideo";
+		}
+		if extension.eq_ignore_ascii_case("mkv") {
+			return "video/x-matroska";
+		}
+		"application/octet-stream"
+	}
+
+	fn read_video_range(
+		request: &Request<Vec<u8>>,
+		total_len: u64
+	) -> Option<Option<(u64, u64)>> {
+		let range = request.headers().get("Range")?.to_str().ok()?;
+		let range = range.strip_prefix("bytes=")?;
+		let (start, end) = range.split_once('-')?;
+		if total_len == 0 {
+			return Some(None);
+		}
+		if start.is_empty() {
+			let suffix_len = end.parse::<u64>().ok()?;
+			if suffix_len == 0 {
+				return Some(None);
+			}
+			let start = total_len.saturating_sub(suffix_len);
+			return Some(Some((start, total_len - 1)));
+		}
+		let start = start.parse::<u64>().ok()?;
+		if start >= total_len {
+			return Some(None);
+		}
+		let end = if end.is_empty() {
+			total_len - 1
+		} else {
+			end.parse::<u64>().ok()?.min(total_len - 1)
+		};
+		if start > end {
+			return Some(None);
+		}
+		Some(Some((start, end)))
+	}
+
 	fn read_sample_pixels(
 		sample: &IMFSample,
 		width: u32,
@@ -1238,79 +1269,32 @@ mod platform {
 		pixels
 	}
 
-	fn update_video_position(
-		display: &IMFVideoDisplayControl,
-		hwnd: HWND,
-		scaling_mode: ScalingMode
-	) -> Result<(), Box<dyn Error>> {
-		let mut native_size = SIZE::default();
-		let mut aspect_size = SIZE::default();
-		let mut client = RECT::default();
-		unsafe {
-			display.GetNativeVideoSize(&mut native_size, &mut aspect_size)?;
-			GetClientRect(hwnd, &mut client)?;
-		}
-		let video_width = if aspect_size.cx > 0 { aspect_size.cx } else { native_size.cx };
-		let video_height = if aspect_size.cy > 0 { aspect_size.cy } else { native_size.cy };
-		let client_width = client.right - client.left;
-		let client_height = client.bottom - client.top;
-		if video_width <= 0 || video_height <= 0 || client_width <= 0 || client_height <= 0 {
-			return Ok(());
-		}
-		let video_width = f64::from(video_width);
-		let video_height = f64::from(video_height);
-		let client_width = f64::from(client_width);
-		let client_height = f64::from(client_height);
-		let full_source = MFVideoNormalizedRect {
-			left: 0.0,
-			top: 0.0,
-			right: 1.0,
-			bottom: 1.0
+	fn attach_desktop_window(hwnd: HWND) {
+		let Some(desktop_window) = find_desktop_window() else {
+			return;
 		};
-		let (source, destination) = match scaling_mode {
-			ScalingMode::FillScreen => {
-				let scale = (client_width / video_width).max(client_height / video_height);
-				let visible_width = (client_width / (video_width * scale)).min(1.0);
-				let visible_height = (client_height / (video_height * scale)).min(1.0);
-				let left = ((1.0 - visible_width) / 2.0) as f32;
-				let top = ((1.0 - visible_height) / 2.0) as f32;
-				(
-					MFVideoNormalizedRect {
-						left,
-						top,
-						right: 1.0 - left,
-						bottom: 1.0 - top
-					},
-					client
-				)
-			}
-			ScalingMode::FitToScreen => {
-				let scale = (client_width / video_width).min(client_height / video_height);
-				let width = (video_width * scale).round() as i32;
-				let height = (video_height * scale).round() as i32;
-				let left = ((client_width as i32) - width) / 2;
-				let top = ((client_height as i32) - height) / 2;
-				(
-					full_source,
-					RECT {
-						left,
-						top,
-						right: left + width,
-						bottom: top + height
-					}
-				)
-			}
-		};
+		eprintln!("Attaching desktop window | {}", desktop_window.label);
 		unsafe {
-			display.SetAspectRatioMode(MFVideoARMode_None.0 as u32)?;
-			display.SetBorderColor(COLORREF(0))?;
-			display.SetVideoPosition(&source, &destination)?;
-			display.RepaintVideo()?;
+			update_desktop_child_style(hwnd);
+			let _ = SetParent(hwnd, Some(desktop_window.hwnd));
+			let mut parent_rect = RECT::default();
+			if GetClientRect(desktop_window.hwnd, &mut parent_rect).is_ok() {
+				let width = parent_rect.right - parent_rect.left;
+				let height = parent_rect.bottom - parent_rect.top;
+				let _ = SetWindowPos(
+					hwnd,
+					Some(HWND_TOP),
+					0,
+					0,
+					width,
+					height,
+					SWP_FRAMECHANGED | SWP_NOACTIVATE
+				);
+			}
 		}
-		Ok(())
 	}
 
-	fn find_desktop_window() -> Option<HWND> {
+	fn find_desktop_window() -> Option<DesktopWindow> {
 		unsafe {
 			let progman_class = wide("Progman");
 			let progman = FindWindowW(
@@ -1330,17 +1314,32 @@ mod platform {
 			);
 			let mut desktop_window = HWND::default();
 			let _ = EnumWindows(
-				Some(read_worker_window),
+				Some(read_top_level_desktop_window),
 				LPARAM(&mut desktop_window as *mut HWND as isize)
 			);
-			if desktop_window.is_invalid() {
-				return Some(progman);
+			if !desktop_window.is_invalid() {
+				return Some(DesktopWindow {
+					hwnd: desktop_window,
+					label: "WorkerW after SHELLDLL_DefView"
+				});
 			}
-			Some(desktop_window)
+			let mut desktop_window = HWND::default();
+			let _ = EnumChildWindows(
+				Some(progman),
+				Some(read_desktop_child_window),
+				LPARAM(&mut desktop_window as *mut HWND as isize)
+			);
+			if !desktop_window.is_invalid() {
+				return Some(DesktopWindow {
+					hwnd: desktop_window,
+					label: "visible full-size Progman child WorkerW"
+				});
+			}
+			Some(DesktopWindow { hwnd: progman, label: "Progman" })
 		}
 	}
 
-	unsafe extern "system" fn read_worker_window(window: HWND, lparam: LPARAM) -> BOOL {
+	unsafe extern "system" fn read_top_level_desktop_window(window: HWND, lparam: LPARAM) -> BOOL {
 		let shell_class = wide("SHELLDLL_DefView");
 		let shell_window = unsafe {
 			FindWindowExW(
@@ -1360,15 +1359,41 @@ mod platform {
 					PCWSTR::null()
 				)
 			} {
-				if !worker_window.is_invalid() {
-					unsafe {
-						*(lparam.0 as *mut HWND) = worker_window;
-					}
-					return BOOL(0);
-				}
+				let desktop_window = unsafe { &mut *(lparam.0 as *mut HWND) };
+				*desktop_window = worker_window;
+				return BOOL(0);
 			}
 		}
 		BOOL(1)
+	}
+
+	unsafe extern "system" fn read_desktop_child_window(window: HWND, lparam: LPARAM) -> BOOL {
+		if read_class_name(window) == "WorkerW" && is_full_size_visible_window(window) {
+			let desktop_window = unsafe { &mut *(lparam.0 as *mut HWND) };
+			*desktop_window = window;
+			return BOOL(0);
+		}
+		BOOL(1)
+	}
+
+	fn read_class_name(hwnd: HWND) -> String {
+		let mut class = [0; 256];
+		let len = unsafe { GetClassNameW(hwnd, &mut class) };
+		String::from_utf16_lossy(&class[..len as usize])
+	}
+
+	fn is_full_size_visible_window(hwnd: HWND) -> bool {
+		if !unsafe { IsWindowVisible(hwnd).as_bool() } {
+			return false;
+		}
+		let mut rect = RECT::default();
+		unsafe { GetClientRect(hwnd, &mut rect).is_ok() && rect.right > 512 && rect.bottom > 512 }
+	}
+
+	unsafe fn update_desktop_child_style(hwnd: HWND) {
+		let style = unsafe { GetWindowLongPtrW(hwnd, GWL_STYLE) };
+		let style = (style | WS_CHILD.0 as isize) & !(WS_POPUP.0 as isize);
+		let _ = unsafe { SetWindowLongPtrW(hwnd, GWL_STYLE, style) };
 	}
 
 	fn wide_path(path: &Path) -> Vec<u16> {
@@ -1388,10 +1413,7 @@ mod platform {
 		let path = wide_path(path);
 		unsafe {
 			let stream = factory.CreateStream()?;
-			stream.InitializeFromFilename(
-				PCWSTR::from_raw(path.as_ptr()),
-				(STGM_CREATE | STGM_WRITE).0
-			)?;
+			stream.InitializeFromFilename(PCWSTR::from_raw(path.as_ptr()), GENERIC_WRITE.0)?;
 			let encoder = factory.CreateEncoder(&GUID_ContainerFormatJpeg, std::ptr::null())?;
 			encoder.Initialize(&stream, WICBitmapEncoderNoCache)?;
 			let mut frame = None;
@@ -1466,31 +1488,8 @@ mod platform {
 	}
 
 	impl WallpaperPlayer {
-		fn apply_scaling_mode(&self) -> Result<(), Box<dyn Error>> {
-			let Some(session) = &self.session else {
-				return Ok(());
-			};
-			let display = read_display_control(session)?;
-			update_video_position(&display, self.hwnd, self.scaling_mode)
-		}
-
-		fn close_session(&mut self) {
-			if let Some(session) = self.session.take() {
-				unsafe {
-					let _ = session.Stop();
-					let _ = session.Close();
-					let _ = session.Shutdown();
-				}
-			}
-			if let Some(source) = self.source.take() {
-				unsafe {
-					let _ = source.Shutdown();
-				}
-			}
-		}
-
 		pub fn needs_poll(&self) -> bool {
-			self.session.is_some()
+			false
 		}
 
 		pub fn play(
@@ -1498,74 +1497,32 @@ mod platform {
 			path: &Path,
 			scaling_mode: ScalingMode
 		) -> Result<(), Box<dyn Error>> {
-			self.close_session();
+			eprintln!("Playing wallpaper | {}", path.display());
 			self.scaling_mode = scaling_mode;
-			let source = create_media_source(path)?;
-			let topology = create_topology(&source, self.hwnd)?;
-			let session = unsafe { MFCreateMediaSession(None::<&IMFAttributes>)? };
-			let position = create_position(0);
-			unsafe {
-				session.SetTopology(0, &topology)?;
-				session.Start(&GUID::zeroed(), &position)?;
-			}
-			self.source = Some(source);
-			self.session = Some(session);
-			let _ = self.apply_scaling_mode();
+			self.serial = self.serial.wrapping_add(1);
+			*self.video_path.lock().unwrap() = Some(path.to_path_buf());
+			show_hwnd(self.hwnd);
+			let source = serde_json::to_string(&format!(
+				"paperwall-wallpaper://localhost/video?{}",
+				self.serial
+			))?;
+			let fit = serde_json::to_string(self.scaling_mode.object_fit())?;
+			self.webview
+				.evaluate_script(&format!("window.playWallpaper({source}, {fit})"))?;
 			Ok(())
 		}
 
 		pub fn poll(&mut self) -> Result<(), Box<dyn Error>> {
-			loop {
-				let result = {
-					let Some(session) = &self.session else {
-						return Ok(());
-					};
-					unsafe { session.GetEvent(MF_EVENT_FLAG_NO_WAIT) }
-				};
-				let event = match result {
-					Ok(event) => event,
-					Err(error) if error.code() == MF_E_NO_EVENTS_AVAILABLE => return Ok(()),
-					Err(error) => return Err(error.into())
-				};
-				unsafe {
-					event.GetStatus()?.ok()?;
-				}
-				let event_type = unsafe { event.GetType()? };
-				if event_type == MEError.0 as u32 {
-					return Err("Media Foundation playback error".into());
-				}
-				if event_type == MEEndOfPresentation.0 as u32
-					|| event_type == MESessionEnded.0 as u32
-				{
-					self.restart()?;
-				}
-				if event_type == MESessionTopologyStatus.0 as u32
-					&& read_event_value(&event) == Some(MF_TOPOSTATUS_READY.0)
-				{
-					self.apply_scaling_mode()?;
-				}
-			}
-		}
-
-		fn restart(&self) -> Result<(), Box<dyn Error>> {
-			if let Some(session) = &self.session {
-				let position = create_position(0);
-				unsafe {
-					session.Start(&GUID::zeroed(), &position)?;
-				}
-			}
 			Ok(())
 		}
 
 		pub fn set_scaling_mode(&mut self, scaling_mode: ScalingMode) {
 			self.scaling_mode = scaling_mode;
-			let _ = self.apply_scaling_mode();
-		}
-	}
-
-	impl Drop for WallpaperPlayer {
-		fn drop(&mut self) {
-			self.close_session();
+			if let Ok(fit) = serde_json::to_string(self.scaling_mode.object_fit()) {
+				let _ = self
+					.webview
+					.evaluate_script(&format!("window.setWallpaperFit({fit})"));
+			}
 		}
 	}
 }

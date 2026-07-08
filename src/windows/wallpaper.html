@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<style>
+		html,
+		body {
+			background: black;
+			height: 100%;
+			margin: 0;
+			overflow: hidden;
+		}
+
+		video {
+			background: black;
+			display: block;
+			height: 100vh;
+			width: 100vw;
+		}
+	</style>
+</head>
+<body>
+	<video autoplay loop muted playsinline></video>
+	<script>
+		const video = document.querySelector("video");
+
+		window.playWallpaper = (source, fit) => {
+			video.style.objectFit = fit;
+			if (video.src !== source) {
+				video.src = source;
+			}
+			video.play().catch(() => {});
+		};
+
+		window.setWallpaperFit = (fit) => {
+			video.style.objectFit = fit;
+		};
+	</script>
+</body>
+</html>
