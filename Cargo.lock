@@ -1505,7 +1505,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tao",
- "windows",
  "wry",
 ]
 
