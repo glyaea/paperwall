@@ -2,25 +2,17 @@
 <html>
 <head>
 	<meta charset="utf-8">
-	<style>
-		body,
-		html,
-		video {
-			background: black;
-			height: 100%;
-			margin: 0;
-			overflow: hidden;
-			width: 100%;
-		}
-
-		video {
-			display: block;
-			object-fit: {{object_fit}};
-		}
-	</style>
+	<link rel="stylesheet" href="wallpaper.css">
 </head>
 <body>
-	<video autoplay loop muted playsinline src="{{video_url}}"></video>
+	<video
+		autoplay
+		loop
+		muted
+		playsinline
+		src="{{video_url}}"
+		style="object-fit: {{object_fit}}"
+	></video>
 	<script>
 		const video = document.querySelector("video");
 

@@ -4,9 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rfd = "0.17.2"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.149"
+serde_json = "1.0.150"
 tao = "0.35.3"
 wry = "0.55.1"
 
@@ -15,3 +14,15 @@ objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", features = ["NSBitmapImageRep", "objc2-core-graphics"] }
 objc2-core-graphics = { version = "0.3.2", features = ["CGImage"] }
 objc2-foundation = "0.3.2"
+rfd = "0.17.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+http-range = "0.1.5"
+rfd = { version = "0.17.2", default-features = false }
+url = "2.5.8"
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging"
+] }

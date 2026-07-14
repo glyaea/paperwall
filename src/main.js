@@ -1,20 +1,10 @@
 const grid = document.querySelector(".grid");
 const scalingModeSelect = document.querySelector("select[name=\"scaling-mode\"]");
 const videoFolderButton = document.querySelector("button[name=\"video-folder\"]");
+let selectedVideo = "";
 
 function postMessage(message) {
 	window.ipc.postMessage(JSON.stringify(message));
-}
-
-function updateThumbnails(root = document) {
-	for (const video of root.querySelectorAll(".tile video")) {
-		video.addEventListener("loadedmetadata", () => {
-			if (Number.isFinite(video.duration)) {
-				video.currentTime = Math.floor(video.duration / 2);
-			}
-		}, { once: true });
-		video.addEventListener("seeked", () => video.pause(), { once: true });
-	}
 }
 
 videoFolderButton.addEventListener("click", () => {
@@ -23,33 +13,37 @@ videoFolderButton.addEventListener("click", () => {
 
 scalingModeSelect.addEventListener("change", () => {
 	postMessage({
-		type: "update_scaling_mode",
-		scaling_mode: scalingModeSelect.value
+		scaling_mode: scalingModeSelect.value,
+		type: "update_scaling_mode"
 	});
 });
 
 grid.addEventListener("click", (event) => {
 	const tile = event.target.closest(".tile");
-	if (!tile) {
+	if (!tile || tile.dataset.videoIndex === selectedVideo) {
 		return;
 	}
+	selectedVideo = tile.dataset.videoIndex;
 	for (const existingTile of grid.querySelectorAll(".tile")) {
-		existingTile.setAttribute("aria-pressed", "false");
+		existingTile.setAttribute(
+			"aria-pressed",
+			String(existingTile.dataset.videoIndex === selectedVideo)
+		);
 	}
-	tile.setAttribute("aria-pressed", "true");
 	postMessage({
-		type: "select_video",
-		path: tile.dataset.videoPath
+		index: Number(selectedVideo),
+		type: "select_video"
 	});
 });
 
 window.paperwall = {
-	setVideoFolder(videoFolder, tiles) {
+	setVideos(videoFolder, tiles) {
+		selectedVideo = "";
 		videoFolderButton.textContent = videoFolder;
 		videoFolderButton.title = videoFolder;
 		grid.innerHTML = tiles;
-		updateThumbnails(grid);
+		window.paperwallPlatform.updateThumbnails(grid);
 	}
 };
 
-updateThumbnails();
+window.paperwallPlatform.updateThumbnails(document);

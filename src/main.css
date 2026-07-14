@@ -56,10 +56,14 @@ button[name="video-folder"] {
 	border-color: var(--border-color-selected);
 }
 
+.tile img,
 .tile video {
 	display: block;
 	height: 100%;
 	object-fit: cover;
-	pointer-events: none;
 	width: 100%;
+}
+
+.tile video {
+	pointer-events: none;
 }
