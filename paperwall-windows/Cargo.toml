@@ -1,0 +1,14 @@
+[package]
+name = "paperwall"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+http-range = "0.1.5"
+rfd = { version = "0.17.2", default-features = false }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+tao = "0.35.3"
+url = "2.5.8"
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+wry = "0.55.1"

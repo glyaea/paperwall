@@ -1,0 +1,56 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<style>
+		body,
+		html,
+		video {
+			background: black;
+			height: 100%;
+			margin: 0;
+			overflow: hidden;
+			width: 100%;
+		}
+
+		video {
+			display: block;
+			object-fit: {{object_fit}};
+		}
+	</style>
+</head>
+<body>
+	<video autoplay loop muted playsinline src="{{video_url}}"></video>
+	<script>
+		const video = document.querySelector("video");
+
+		video.addEventListener("error", () => {
+			const error = video.error;
+			const code = error ? error.code : "unknown";
+			window.ipc.postMessage(`Playing wallpaper failed | code=${code}`);
+		});
+
+		video.addEventListener("playing", () => {
+			window.setTimeout(() => {
+				const message = `Playing wallpaper | ${video.videoWidth}x${video.videoHeight}`;
+				window.ipc.postMessage(
+					`${message} | t=${video.currentTime.toFixed(2)}`
+				);
+			}, 1000);
+		}, { once: true });
+
+		window.paperwall = {
+			setScalingMode(scalingMode) {
+				video.style.objectFit = scalingMode === "{{fill_screen}}" ? "cover" : "contain";
+			},
+			setVideoSource(source) {
+				video.src = source;
+				video.load();
+				video.play();
+			}
+		};
+
+		video.play();
+	</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="stylesheet" href="main.css">
+</head>
+<body>
+	<main>
+		<section class="controls">
+			<label>Video Folder</label>
+			<button name="video-folder" title="{{video_folder}}" type="button">{{video_folder}}</button>
+			<label>Scaling Mode</label>
+			<select name="scaling-mode">
+				{{scaling_mode_options}}
+			</select>
+		</section>
+		<section class="grid">
+			{{tiles}}
+		</section>
+	</main>
+	<script src="main.js"></script>
+</body>
+</html>
